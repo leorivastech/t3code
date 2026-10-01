@@ -582,10 +582,12 @@ async function isTypeOnlyPackage(packageJson: PackageJson, packageRoot: string):
   if (entries.some(isDeclared) || targets.some((target) => !isTypeDeclaration(target))) {
     return false;
   }
-  // Without `exports`, Node still loads the package's index.js, an empty `main` included.
-  return packageJson.exports !== undefined && packageJson.exports !== null
-    ? true
-    : !(await fileExists(NodePath.join(packageRoot, "index.js")));
+  // Without `exports`, Node still loads the package's index file, an empty `main` included.
+  if (packageJson.exports !== undefined && packageJson.exports !== null) return true;
+  for (const indexFile of ["index.js", "index.json", "index.node"]) {
+    if (await fileExists(NodePath.join(packageRoot, indexFile))) return false;
+  }
+  return true;
 }
 
 async function collectProductionDependencyPackages(
