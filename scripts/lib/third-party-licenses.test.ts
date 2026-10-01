@@ -251,9 +251,16 @@ describe("third-party license generation", () => {
         main: "./dist/index.mjs",
         exports: { ".": { types: "./dist/index.d.mts", import: "./dist/index.mjs" } },
       },
+      hasIndexJs: false,
     },
-    { shape: "only a stylesheet", entry: { main: "", style: "dist/theme.css" } },
-  ])("keeps a package that declares types but ships $shape", async ({ entry }) => {
+    { shape: "only a stylesheet", entry: { main: "", style: "dist/theme.css" }, hasIndexJs: false },
+    {
+      shape: "only a react-native entry",
+      entry: { main: "", "react-native": "lib/index.native.js" },
+      hasIndexJs: false,
+    },
+    { shape: "an index.js behind an empty main", entry: { main: "" }, hasIndexJs: true },
+  ])("keeps a package that declares types but ships $shape", async ({ entry, hasIndexJs }) => {
     const fixture = await createFixture();
     await writeJson(NodePath.join(fixture.dependencyRoot, "package.json"), {
       name: "demo-dependency",
@@ -263,6 +270,7 @@ describe("third-party license generation", () => {
       ...entry,
       repository: "example/demo-dependency",
     });
+    if (!hasIndexJs) await NodeFSP.rm(NodePath.join(fixture.dependencyRoot, "index.js"));
 
     const manifest = await generateThirdPartyLicenseManifest({
       configFile: fixture.configFile,

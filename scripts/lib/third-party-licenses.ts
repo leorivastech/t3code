@@ -56,6 +56,7 @@ interface PackageJson {
   readonly module?: unknown;
   readonly name?: unknown;
   readonly optionalDependencies?: Readonly<Record<string, string>>;
+  readonly "react-native"?: unknown;
   readonly repository?: unknown;
   readonly sass?: unknown;
   readonly style?: unknown;
@@ -573,6 +574,7 @@ async function isTypeOnlyPackage(packageJson: PackageJson, packageRoot: string):
     packageJson.main,
     packageJson.module,
     packageJson.browser,
+    packageJson["react-native"],
     packageJson.bin,
     packageJson.style,
     packageJson.sass,
@@ -580,8 +582,8 @@ async function isTypeOnlyPackage(packageJson: PackageJson, packageRoot: string):
   if (entries.some(isDeclared) || targets.some((target) => !isTypeDeclaration(target))) {
     return false;
   }
-  // Without `main` or `exports`, Node still loads the package's index.js.
-  return packageJson.main !== undefined || packageJson.exports !== undefined
+  // Without `exports`, Node still loads the package's index.js, an empty `main` included.
+  return packageJson.exports !== undefined && packageJson.exports !== null
     ? true
     : !(await fileExists(NodePath.join(packageRoot, "index.js")));
 }
