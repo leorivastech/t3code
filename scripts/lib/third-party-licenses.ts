@@ -45,13 +45,22 @@ interface GeneratedNoticeConfigEntry {
 }
 
 interface PackageJson {
+  readonly bin?: unknown;
+  readonly browser?: unknown;
   readonly dependencies?: Readonly<Record<string, string>>;
+  readonly exports?: unknown;
   readonly homepage?: unknown;
   readonly license?: unknown;
   readonly licenses?: unknown;
+  readonly main?: unknown;
+  readonly module?: unknown;
   readonly name?: unknown;
   readonly optionalDependencies?: Readonly<Record<string, string>>;
   readonly repository?: unknown;
+  readonly sass?: unknown;
+  readonly style?: unknown;
+  readonly types?: unknown;
+  readonly typings?: unknown;
   readonly version?: unknown;
 }
 
@@ -510,6 +519,73 @@ function dependencyNames(packageJson: PackageJson): ReadonlyArray<string> {
   ].sort((left, right) => left.localeCompare(right));
 }
 
+interface ExportTarget {
+  readonly path: string;
+  readonly underTypesCondition: boolean;
+}
+
+function exportTargets(value: unknown, underTypesCondition = false): ReadonlyArray<ExportTarget> {
+  if (typeof value === "string") return [{ path: value, underTypesCondition }];
+  if (Array.isArray(value))
+    return value.flatMap((item) => exportTargets(item, underTypesCondition));
+  if (value === null || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, item]) =>
+    exportTargets(item, underTypesCondition || key.startsWith("types") || key === "typings"),
+  );
+}
+
+/** Declarations, or the package's own manifest that many packages also export. Neither is code. */
+function isTypeDeclaration(target: ExportTarget): boolean {
+  return (
+    target.underTypesCondition ||
+    /\.d\.[cm]?ts$/u.test(target.path) ||
+    target.path === "./package.json"
+  );
+}
+
+function isDeclared(value: unknown): boolean {
+  if (typeof value === "string") return value.trim() !== "";
+  return value !== null && typeof value === "object" && Object.keys(value).length > 0;
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await NodeFSP.access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A package that only describes types (DefinitelyTyped, csstype, undici-types): it declares types
+ * and has no JS entry, so nothing of it ships. A types condition or a name with "types" in it is not
+ * enough on its own: `@shikijs/types` exports real code next to its declarations.
+ */
+async function isTypeOnlyPackage(packageJson: PackageJson, packageRoot: string): Promise<boolean> {
+  const targets = exportTargets(packageJson.exports);
+  const declaresTypes =
+    isDeclared(packageJson.types) ||
+    isDeclared(packageJson.typings) ||
+    targets.some(isTypeDeclaration);
+  if (!declaresTypes) return false;
+  const entries = [
+    packageJson.main,
+    packageJson.module,
+    packageJson.browser,
+    packageJson.bin,
+    packageJson.style,
+    packageJson.sass,
+  ];
+  if (entries.some(isDeclared) || targets.some((target) => !isTypeDeclaration(target))) {
+    return false;
+  }
+  // Without `main` or `exports`, Node still loads the package's index.js.
+  return packageJson.main !== undefined || packageJson.exports !== undefined
+    ? true
+    : !(await fileExists(NodePath.join(packageRoot, "index.js")));
+}
+
 async function collectProductionDependencyPackages(
   packageManifests: ReadonlyArray<ThirdPartyLicensePackageManifest>,
 ): Promise<PackageCollection> {
@@ -530,7 +606,11 @@ async function collectProductionDependencyPackages(
       const dependencyPackageJsonPath = NodePath.join(resolved.packageRoot, "package.json");
       const name =
         typeof resolved.packageJson.name === "string" ? resolved.packageJson.name : dependencyName;
-      if (!name.startsWith(FIRST_PARTY_PACKAGE_PREFIX)) {
+      // Type-only packages ship nothing, but what they depend on may, so the walk goes on below.
+      if (
+        !name.startsWith(FIRST_PARTY_PACKAGE_PREFIX) &&
+        !(await isTypeOnlyPackage(resolved.packageJson, resolved.packageRoot))
+      ) {
         const identity = packageIdentity(resolved.packageJson, resolved.packageRoot);
         const existing = collection.byIdentity.get(identity);
         if (existing) {
