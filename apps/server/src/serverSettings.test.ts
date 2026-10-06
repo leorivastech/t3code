@@ -1714,6 +1714,74 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
   );
 
+  it.effect(
+    "keeps the Telegram bot token in the secret store and tells clients only that one is set",
+    () =>
+      Effect.gen(function* () {
+        const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const serverConfig = yield* ServerConfig.ServerConfig;
+        const fileSystem = yield* FileSystem.FileSystem;
+
+        const saved = yield* serverSettings.updateSettings({
+          telegram: { botToken: "123:bot-token", chatIds: [42, -1001], ownerIds: [42] },
+        });
+        assert.deepEqual(saved.telegram, {
+          botToken: "123:bot-token",
+          chatIds: [42, -1001],
+          ownerIds: [42],
+        });
+
+        const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+        assert.notInclude(raw, "123:bot-token");
+        assert.include(raw, "-1001");
+
+        const forClient = ServerSettingsModule.redactServerSettingsForClient(saved).telegram;
+        assert.notInclude(forClient.botToken, "123:bot-token");
+        assert.isAbove(forClient.botToken.length, 0);
+        assert.deepEqual(forClient.chatIds, [42, -1001]);
+
+        // A client echoing the redacted token back, or omitting it, keeps the saved one.
+        yield* serverSettings.updateSettings({ telegram: forClient });
+        yield* serverSettings.updateSettings({ telegram: { ownerIds: [] } });
+        assert.deepEqual((yield* serverSettings.getSettings).telegram, {
+          botToken: "123:bot-token",
+          chatIds: [42, -1001],
+          ownerIds: [],
+        });
+
+        const cleared = yield* serverSettings.updateSettings({ telegram: { botToken: "" } });
+        assert.equal(cleared.telegram.botToken, "");
+        assert.isTrue(Option.isNone(yield* secrets.get("telegram-bot-token")));
+      }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
+  it.effect("moves a hand-edited Telegram bot token into the secret store when settings load", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        '{"telegram":{"botToken":"hand-edited-token","chatIds":[42]}}',
+      );
+
+      const loaded = yield* serverSettings.getSettings;
+
+      assert.equal(loaded.telegram.botToken, "hand-edited-token");
+      assert.notInclude(
+        yield* fileSystem.readFileString(serverConfig.settingsPath),
+        "hand-edited-token",
+      );
+      const stored = yield* secrets.get("telegram-bot-token");
+      assert.equal(
+        Option.isSome(stored) ? new TextDecoder().decode(stored.value) : null,
+        "hand-edited-token",
+      );
+    }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
+  );
+
   it.effect("removes a Bitbucket secret once its token is cleared by hand in settings.json", () =>
     Effect.gen(function* () {
       const serverConfig = yield* ServerConfig.ServerConfig;

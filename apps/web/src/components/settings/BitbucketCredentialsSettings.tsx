@@ -44,7 +44,7 @@ function savedMethod(saved: BitbucketSettings): CredentialMethod | null {
 }
 
 /** A write-only token field. It never shows the saved token; typing a new one replaces it. */
-function TokenInput({
+export function TokenInput({
   id,
   isSaved,
   draft,

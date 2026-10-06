@@ -17,6 +17,7 @@ import {
   TrimmedString,
 } from "./baseSchemas.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
+import { TelegramId } from "./telegram.ts";
 import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
@@ -1049,6 +1050,21 @@ export const GitHubSettings = Schema.Struct({
 });
 export type GitHubSettings = typeof GitHubSettings.Type;
 
+/**
+ * The Telegram channel of this environment. Agents send text and files to
+ * `chatIds`, the first being the default. People in `ownerIds` can answer from
+ * their private chat with the bot, and their text enters the thread as a user
+ * message, so an empty list turns answering off. The bot token lives in the
+ * server's secret store; settings and clients only see a redaction marker when
+ * one is set.
+ */
+export const TelegramSettings = Schema.Struct({
+  botToken: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  chatIds: Schema.Array(TelegramId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  ownerIds: Schema.Array(TelegramId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type TelegramSettings = typeof TelegramSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -1460,6 +1476,7 @@ export const ServerSettings = Schema.Struct({
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   bitbucket: BitbucketSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   github: GitHubSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  telegram: TelegramSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // Keyed by a user-chosen id so a source keeps its rows across edits. Entries
   // this build cannot decode round-trip untouched, as provider instances do.
   usageLimitSources: Schema.Record(UsageLimitSourceId, UsageLimitSourceConfig).pipe(
@@ -1759,6 +1776,14 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       hosts: Schema.optionalKey(Schema.Record(GitHubHost, GitHubHostSettings)),
       tokens: Schema.optionalKey(Schema.Record(GitHubHost, TrimmedString)),
+    }),
+  ),
+  /** An empty token clears it; an omitted one keeps what the server has. */
+  telegram: Schema.optionalKey(
+    Schema.Struct({
+      botToken: Schema.optionalKey(TrimmedString),
+      chatIds: Schema.optionalKey(Schema.Array(TelegramId)),
+      ownerIds: Schema.optionalKey(Schema.Array(TelegramId)),
     }),
   ),
   providers: Schema.optionalKey(

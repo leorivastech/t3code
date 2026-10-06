@@ -62,7 +62,8 @@ export type T3McpToolSummaryAction =
   | "device"
   | "html-preview"
   | "html-render"
-  | "mods";
+  | "mods"
+  | "telegram-send";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -319,6 +320,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   mods_guide: tool(["Read", "Reading", "Read", "the mod guide"], "mods"),
   mods_list: tool(["List", "Listing", "Listed", "mods"], "mods"),
   mods_run: tool(["Run", "Running", "Ran", "a mod command"], "mods"),
+  telegram_send: tool(["Send", "Sending", "Sent", "a Telegram message"], "telegram-send"),
 };
 
 /**

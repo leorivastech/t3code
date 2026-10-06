@@ -1182,6 +1182,10 @@ export function createServerEnvironmentAtoms<R, E>(
       concurrency: configConcurrency,
     }),
     updateSettings,
+    testTelegram: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:test-telegram",
+      tag: WS_METHODS.serverTestTelegram,
+    }),
     // Provider-instance mutations share the settings command and its
     // environment-serial scheduler. The named boundary keeps clients on the
     // atomic map-entry payload instead of rebuilding a stale whole map.
