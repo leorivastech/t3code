@@ -37,6 +37,7 @@ import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderR
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as PullRequestFilesViewed from "./persistence/PullRequestFilesViewed.ts";
+import * as TelegramMessages from "./persistence/TelegramMessages.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ProviderEventIngestor from "./orchestration-v2/ProviderEventIngestor.ts";
@@ -53,6 +54,7 @@ import * as BitbucketApi from "./sourceControl/BitbucketApi.ts";
 import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as ForgejoCli from "./sourceControl/ForgejoCli.ts";
+import * as TelegramChannel from "./telegram/TelegramChannel.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceRegistryHydration.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -324,6 +326,8 @@ const layerPullRequestService = PullRequestService.layer.pipe(
   Layer.provide(SourceControlRateLimit.layer),
 );
 
+const layerTelegramChannel = TelegramChannel.layer.pipe(Layer.provide(TelegramMessages.layer));
+
 const layerGitManager = GitManager.layer.pipe(
   // Per-project git settings resolve the acting thread's project.
   Layer.provide(Layer.merge(ProjectionStoreV2.layer, ProjectStore.layer)),
@@ -552,6 +556,12 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(layerPullRequestService),
     Layer.provide(ProjectionStoreV2.layer),
   ),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const channel = yield* TelegramChannel.TelegramChannel;
+      yield* channel.start();
+    }),
+  ).pipe(Layer.provide(layerTelegramChannel)),
   // Subscribes to `account.rate-limits.updated` so usage bars track live
   // telemetry instead of waiting for the next status probe.
   ProviderUsageLimitsIngestion.layer,
@@ -690,6 +700,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(ServerBrowser.layer.pipe(Layer.provide(DesktopBrowserChannel.layer))),
   // Server browser tabs and HTML render previews install and run the same headless browser.
   Layer.provide(PreviewBrowser.layer),
+  // The listener, the Settings test, and the agents' tool all go through one bot.
+  Layer.provide(layerTelegramChannel),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
   Layer.provide(layerCommandReadiness),

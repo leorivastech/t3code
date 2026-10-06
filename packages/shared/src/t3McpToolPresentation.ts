@@ -61,7 +61,8 @@ export type T3McpToolSummaryAction =
   | "browser"
   | "device"
   | "html-preview"
-  | "html-render";
+  | "html-render"
+  | "telegram-send";
 
 export interface T3McpToolDefinition {
   readonly displayName: string;
@@ -315,6 +316,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   t3_thread_send_attachments: tool(["Send", "Sending", "Sent", "attachments"], "attachment-send"),
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
+  telegram_send: tool(["Send", "Sending", "Sent", "a Telegram message"], "telegram-send"),
 };
 
 /**

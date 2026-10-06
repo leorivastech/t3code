@@ -404,6 +404,9 @@ export function summarizeT3ToolCalls(
     case "html-render":
       label = phrase("Rendered", "render", quantity(selected.length, "HTML page"));
       break;
+    case "telegram-send":
+      label = phrase("Sent", "send", quantity(selected.length, "Telegram message"));
+      break;
     case "capabilities":
       label = phrase("Checked", "check", `orchestration capabilities ${times}`);
       break;
