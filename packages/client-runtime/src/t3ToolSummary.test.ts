@@ -201,6 +201,24 @@ describe("summarizeT3ToolCalls", () => {
     });
   });
 
+  it("counts delivered Telegram messages and keeps rejected sends out of the count", () => {
+    const rejected = completed(
+      { text: "Report ready" },
+      { _tag: "TelegramSendError", reason: "chat-not-allowed" },
+    );
+    expect(
+      summarizeT3ToolCalls("telegram-send", [
+        completed({ text: "Report ready" }, { chatId: 42, messageId: 1 }),
+        completed({ path: "/tmp/report.pdf" }, { chatId: 42, messageId: 2 }),
+        rejected,
+      ]),
+    ).toEqual({ label: "Sent 2 Telegram messages", failedCount: 1 });
+    expect(summarizeT3ToolCalls("telegram-send", [rejected])).toEqual({
+      label: "Tried to send 1 Telegram message",
+      failedCount: 1,
+    });
+  });
+
   it("does not confuse a child's failure or wait timeout with failure of the orchestration call", () => {
     const failedChild = { taskId: "task-1", status: "failed", summary: "command not found" };
     expect(

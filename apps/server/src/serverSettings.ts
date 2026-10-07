@@ -160,6 +160,7 @@ const BITBUCKET_SECRET_NAMES = {
   apiToken: "bitbucket-api-token",
 } as const;
 const BITBUCKET_SECRET_FIELDS = ["accessToken", "apiToken"] as const;
+const TELEGRAM_SECRET_NAME = "telegram-bot-token";
 
 /** Hosts are case-insensitive; a patch can arrive before decoding lowercased its keys. */
 function gitHubTokenSecretName(host: string): string {
@@ -215,7 +216,8 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       Object.entries(settings.github.tokens).map(([host, token]) => [host, redactSecret(token)]),
     ),
   };
-  return { ...settings, providerInstances, usageLimitSources, bitbucket, github };
+  const telegram = { ...settings.telegram, botToken: redactSecret(settings.telegram.botToken) };
+  return { ...settings, providerInstances, usageLimitSources, bitbucket, github, telegram };
 }
 
 export function applyProviderInstanceMutation(
@@ -693,11 +695,11 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Moves Bitbucket tokens hand-edited into settings.json into the secret store as they load,
+   * Moves Bitbucket and Telegram tokens hand-edited into settings.json into the secret store as they load,
    * so plaintext does not stay on disk. If the store is unavailable, the token keeps working
    * from the file and the move is retried on the next load.
    */
-  const moveInlineBitbucketTokens = (settings: ServerSettings) =>
+  const moveInlineTokens = (settings: ServerSettings) =>
     Effect.gen(function* () {
       const bitbucket = { ...settings.bitbucket };
       let moved = false;
@@ -735,7 +737,26 @@ const make = Effect.gen(function* () {
         tokens[host] = SECRET_REDACTED;
         moved = true;
       }
-      return moved ? { ...settings, bitbucket, github: { ...settings.github, tokens } } : settings;
+      let telegram = settings.telegram;
+      if (telegram.botToken.length > 0 && telegram.botToken !== SECRET_REDACTED) {
+        const stored = yield* secretStore
+          .set(TELEGRAM_SECRET_NAME, textEncoder.encode(telegram.botToken))
+          .pipe(
+            Effect.as(true),
+            Effect.catch(() =>
+              Effect.logWarning("failed to move the Telegram bot token into the secret store").pipe(
+                Effect.as(false),
+              ),
+            ),
+          );
+        if (stored) {
+          telegram = { ...telegram, botToken: SECRET_REDACTED };
+          moved = true;
+        }
+      }
+      return moved
+        ? { ...settings, bitbucket, github: { ...settings.github, tokens }, telegram }
+        : settings;
     });
 
   const loadSettingsFromDisk = Effect.gen(function* () {
@@ -823,7 +844,7 @@ const make = Effect.gen(function* () {
       ? foldLegacyProjectSettings(loaded, legacyProjectRows)
       : loaded;
     // Only rewrite a file that decoded cleanly; an untrusted one stays for the user to repair.
-    const migrated = settingsFileTrusted ? yield* moveInlineBitbucketTokens(folded) : folded;
+    const migrated = settingsFileTrusted ? yield* moveInlineTokens(folded) : folded;
     if (migrated !== loaded) {
       yield* writeSettingsAtomically(migrated);
     }
@@ -925,12 +946,27 @@ const make = Effect.gen(function* () {
           );
         tokens[host] = Option.isSome(secret) ? textDecoder.decode(secret.value) : "";
       }
+      let telegram = settings.telegram;
+      if (telegram.botToken === SECRET_REDACTED) {
+        const secret = yield* secretStore
+          .get(TELEGRAM_SECRET_NAME)
+          .pipe(
+            Effect.mapError(
+              (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+            ),
+          );
+        telegram = {
+          ...telegram,
+          botToken: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
+        };
+      }
       return {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
         bitbucket,
         github: { ...settings.github, tokens },
+        telegram,
       };
     });
 
@@ -1124,6 +1160,30 @@ const make = Effect.gen(function* () {
         });
       }
 
+      let telegram = next.telegram;
+      const inlineBotToken = current.telegram.botToken;
+      // Same rule as Bitbucket: the marker keeps what is saved, or moves a hand-edited value.
+      const botToken =
+        telegram.botToken !== SECRET_REDACTED
+          ? telegram.botToken
+          : inlineBotToken === SECRET_REDACTED || inlineBotToken.length === 0
+            ? null
+            : inlineBotToken;
+      if (botToken !== null && botToken.length === 0) {
+        changes.push({
+          kind: "remove",
+          secretName: TELEGRAM_SECRET_NAME,
+          operation: "remove-secret",
+        });
+      } else if (botToken !== null) {
+        changes.push({
+          kind: "write",
+          secretName: TELEGRAM_SECRET_NAME,
+          value: textEncoder.encode(botToken),
+        });
+        telegram = { ...telegram, botToken: SECRET_REDACTED };
+      }
+
       return {
         settings: {
           ...next,
@@ -1131,6 +1191,7 @@ const make = Effect.gen(function* () {
           usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
           bitbucket,
           github: { ...next.github, tokens },
+          telegram,
         },
         changes,
       };

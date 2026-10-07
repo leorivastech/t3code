@@ -624,6 +624,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "telegram",
+    title: "Telegram",
+    to: "/settings/integrations",
+    searchTerms: ["bot token chat owner reply threads send pdf image video document message"],
+    environmentOnly: true,
+  },
+  {
     id: "agent-browser-access",
     title: "Agent browser access",
     to: "/settings/integrations",
