@@ -16,6 +16,7 @@ import {
   ChatGptHandoffInput,
   ChatGptHandoffState,
 } from "./providerSetup.ts";
+import { ModRequestInput, ModRequestResult, ModSnapshot, ModSubscribeInput } from "./mod.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
@@ -400,6 +401,8 @@ export const WS_METHODS = {
   providerInstallCancel: "provider.install.cancel",
   providerInstallSubscribe: "provider.install.subscribe",
   providerInstallRemove: "provider.install.remove",
+  modSubscribe: "mods.subscribe",
+  modRequest: "mods.request",
 
   // VCS methods
   vcsPull: "vcs.pull",
@@ -696,6 +699,19 @@ const WsProviderInstallSubscribeRpc = Rpc.make(WS_METHODS.providerInstallSubscri
   success: ProviderInstallState,
   error: ProviderSetupRpcError,
   stream: true,
+});
+
+const WsModSubscribeRpc = Rpc.make(WS_METHODS.modSubscribe, {
+  payload: ModSubscribeInput,
+  success: ModSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsModRequestRpc = Rpc.make(WS_METHODS.modRequest, {
+  payload: ModRequestInput,
+  success: ModRequestResult,
+  error: EnvironmentAuthorizationError,
 });
 
 const WsProviderInstallRemoveRpc = Rpc.make(WS_METHODS.providerInstallRemove, {
@@ -1799,6 +1815,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderInstallStartRpc,
   WsProviderInstallCancelRpc,
   WsProviderInstallSubscribeRpc,
+  WsModSubscribeRpc,
+  WsModRequestRpc,
   WsProviderInstallRemoveRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,

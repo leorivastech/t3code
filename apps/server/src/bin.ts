@@ -4,8 +4,8 @@
  * Every ACP agent spawns `t3 acp-mcp-bridge` while opening its session, and
  * terminal-fallback agents run `t3 acp-mcp-call` per tool call, so their
  * startup sits on first-message latency. Both dispatch here before the full
- * CLI module graph (seconds of evaluation) loads; everything else defers to
- * the real CLI in ./binCli.ts.
+ * CLI module graph (seconds of evaluation) loads, as does the process that
+ * runs mods; everything else defers to the real CLI in ./binCli.ts.
  */
 import { isEntrypoint } from "./entrypoint.ts";
 
@@ -20,6 +20,14 @@ if (
   if (command === "acp-mcp-bridge" || command === "acp-mcp-call") {
     const { runAcpMcpCliFastPath } = await import("./mcp/AcpMcpStdioBridge.ts");
     await runAcpMcpCliFastPath(command, process.argv.slice(3));
+  } else if (command === "__mod-engine") {
+    // The process `Mods` runs the user's mods in, speaking JSON lines on stdio.
+    const { serveModEngine } = await import("@t3tools/mod-engine");
+    serveModEngine(
+      process.stdin,
+      (line) => process.stdout.write(line),
+      () => process.exit(0),
+    );
   } else {
     const { runCli } = await import("./binCli.ts");
     runCli();

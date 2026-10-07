@@ -33,6 +33,10 @@ ACP fallback: some ACP agents accept the injected MCP server but fail to expose 
 ### Showing visuals
 
 When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, then publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.
+
+### Mods
+
+A mod is a small folder of local code that adds interface to T3 Code itself (a pane beside the chat, a band above the composer, a status line, slash commands). Mods are the user's, work the same with every model, and stay after the reply ends; use \`html_render\` instead for a one-off visual. When the user asks to make, change, list, or open a mod, call \`mods_guide\` first, then check your work with \`mods_list\` and open it with \`mods_run\`.
 `;
 
 export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
