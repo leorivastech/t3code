@@ -43,6 +43,9 @@ import * as ProviderEventIngestor from "./orchestration-v2/ProviderEventIngestor
 import * as ModelManifest from "./provider/ModelManifest.ts";
 import * as ResetCreditCoordinator from "./provider/resetCreditCoordinator.ts";
 import * as ProviderEventLoggers from "./provider/ProviderEventLoggers.ts";
+import { makeAgentEventReader } from "./mods/agentEvents.ts";
+import * as Mods from "./mods/Mods.ts";
+import * as ThreadManagementService from "./orchestration-v2/ThreadManagementService.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
 import * as OpenCodeServerLedger from "./provider/OpenCodeServerLedger.ts";
 import * as AcpRegistryCatalog from "./provider/AcpRegistryCatalog.ts";
@@ -532,6 +535,20 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(ProjectionStoreV2.layer),
   ),
   layerThreadPullRequestWorker,
+  // Mods watch what any provider's agent does: the event log is the same for all.
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const mods = yield* Mods.Mods;
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      const read = makeAgentEventReader();
+      yield* ServerActivation.forkParked(
+        Stream.runForEach(threads.streamDomainEvents, (event) => {
+          const told = read(event);
+          return told === null ? Effect.void : mods.notify(told.threadId, told.event);
+        }),
+      );
+    }),
+  ).pipe(Layer.provide(Mods.layer)),
   Layer.effectDiscard(
     Effect.gen(function* () {
       const service = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -604,7 +621,12 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   // from the repo's `model-manifest.json` on `main` and applied by the
   // Codex/Claude drivers.
   Layer.provideMerge(
-    Layer.mergeAll(ProviderEventLoggers.layer, ModelManifest.layer, ResetCreditCoordinator.layer),
+    Layer.mergeAll(
+      ProviderEventLoggers.layer,
+      ModelManifest.layer,
+      ResetCreditCoordinator.layer,
+      Mods.layer,
+    ),
   ),
   // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
   // `ProviderRegistry.layer` pulled `OpenCodeRuntimeLive` in for itself, but

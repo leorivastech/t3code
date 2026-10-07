@@ -47,6 +47,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.providerInstallCancel]: "provider",
   [WS_METHODS.providerInstallSubscribe]: "provider",
   [WS_METHODS.providerInstallRemove]: "provider",
+  [WS_METHODS.modSubscribe]: "provider",
+  [WS_METHODS.modRequest]: "provider",
   [WS_METHODS.serverUpdateServer]: "server",
   [WS_METHODS.serverUpdateServerWithProgress]: "server",
   [WS_METHODS.serverCommitDesktopUpdate]: "server",

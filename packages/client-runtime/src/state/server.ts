@@ -1057,6 +1057,15 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:provider:install-remove",
       tag: WS_METHODS.providerInstallRemove,
     }),
+    mod: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:mods",
+      tag: WS_METHODS.modSubscribe,
+      idleTtlMs: 0,
+    }),
+    requestMod: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:mods-request",
+      tag: WS_METHODS.modRequest,
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,

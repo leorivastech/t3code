@@ -30,6 +30,7 @@ const RIGHT_PANEL_KINDS = [
   "terminal",
   "pull-request",
   "pull-requests",
+  "mod-panes",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -85,7 +86,12 @@ export type RightPanelSurface =
       url?: string;
     }
   /** The thread's linked pull requests, one singleton tab beside any number of `pull-request` tabs. */
-  | { id: "pull-requests"; kind: "pull-requests" };
+  | { id: "pull-requests"; kind: "pull-requests" }
+  /**
+   * Every pane the thread's mods have open, as one tab. The server decides when
+   * it exists (`showModPanes` / `hideModPanes`), so it is session state and never persisted.
+   */
+  | { id: "mod-panes"; kind: "mod-panes" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v9 removed the "plan" surface kind (plans render inline in the transcript).
@@ -125,6 +131,11 @@ interface RightPanelStoreState {
   /** Session-only count of user panel choices per thread. Automatic updates do not advance it. */
   userActionRevisionByThreadKey: Record<string, number>;
   closeRevisionByThreadKey: Record<string, number>;
+  /**
+   * Session-only user-action revision read when a thread's mod panes first appeared. Kept
+   * until the mod closes its last pane, so `showModPanes` can tell a later user choice.
+   */
+  modPanesUserActionRevisionByThreadKey: Record<string, number>;
   getUserActionRevision: (ref: ScopedThreadRef) => number;
   /**
    * Open a surface on behalf of the app, not the user. Refused when the user
@@ -139,6 +150,20 @@ interface RightPanelStoreState {
     ref: ScopedThreadRef,
     kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request">,
   ) => void;
+  /**
+   * A mod has panes open. Adds the mod-panes tab on behalf of the app and brings it
+   * forward unless the user is looking at another surface. Refused once the user has made a
+   * panel choice since the panes first appeared, so a tab or panel they closed stays closed
+   * until the mod closes its last pane and opens another.
+   */
+  showModPanes: (ref: ScopedThreadRef) => void;
+  /**
+   * A command opened a pane: the person, or their agent, asked to see it. Opens the
+   * panel on the mod-panes tab whatever was closed or in front before.
+   */
+  revealModPanes: (ref: ScopedThreadRef) => void;
+  /** The mod closed its last pane. Removes the mod-panes tab on behalf of the app. */
+  hideModPanes: (ref: ScopedThreadRef) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
@@ -214,6 +239,8 @@ const singletonSurface = (
       return { id: "pull-requests", kind };
     case "device":
       return { id: "device", kind };
+    case "mod-panes":
+      return { id: "mod-panes", kind };
   }
 };
 
@@ -301,6 +328,32 @@ const upsertSurface = (
   activeSurfaceId: activate ? surface.id : current.activeSurfaceId,
 });
 
+/** Drops a surface, handing the selection to its neighbor and closing a panel left empty. */
+const removeSurface = (
+  current: ThreadRightPanelState,
+  surfaceId: string,
+): ThreadRightPanelState => {
+  const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
+  if (index < 0) return current;
+  const surfaces = current.surfaces.filter((surface) => surface.id !== surfaceId);
+  if (current.activeSurfaceId !== surfaceId) {
+    return { ...current, isOpen: surfaces.length > 0 && current.isOpen, surfaces };
+  }
+  const fallback = surfaces[Math.min(index, surfaces.length - 1)] ?? null;
+  return {
+    ...current,
+    isOpen: surfaces.length > 0 && current.isOpen,
+    surfaces,
+    activeSurfaceId: fallback?.id ?? null,
+  };
+};
+
+const isEmptyThreadState = (state: ThreadRightPanelState) =>
+  !state.isOpen &&
+  state.activeSurfaceId === null &&
+  state.surfaces.length === 0 &&
+  !state.dismissedDeviceSurfaceIds?.length;
+
 const updateThreadStateMap = (
   byThreadKey: Record<string, ThreadRightPanelState>,
   threadKey: string,
@@ -308,12 +361,7 @@ const updateThreadStateMap = (
 ): Record<string, ThreadRightPanelState> => {
   const current = byThreadKey[threadKey] ?? EMPTY_THREAD_STATE;
   const next = updater(current);
-  if (
-    !next.isOpen &&
-    next.activeSurfaceId === null &&
-    next.surfaces.length === 0 &&
-    !next.dismissedDeviceSurfaceIds?.length
-  ) {
+  if (isEmptyThreadState(next)) {
     if (!(threadKey in byThreadKey)) return byThreadKey;
     const { [threadKey]: _removed, ...rest } = byThreadKey;
     return rest;
@@ -458,8 +506,9 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
                     // Removed surfaces: plans render inline, agents in thread lineage.
+                    // Mod panes are session state and never restored.
                     const kind = (surface as { kind?: string }).kind;
-                    if (kind === "plan" || kind === "agents") return [];
+                    if (kind === "plan" || kind === "agents" || kind === "mod-panes") return [];
                     if (surface.kind === "file") {
                       const revealLine =
                         typeof surface.revealLine === "number" &&
@@ -593,6 +642,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       threadPanelVisibilityByThreadKey: {},
       userActionRevisionByThreadKey: {},
       closeRevisionByThreadKey: {},
+      modPanesUserActionRevisionByThreadKey: {},
       getUserActionRevision: (ref) =>
         get().userActionRevisionByThreadKey[scopedThreadKey(ref)] ?? 0,
       openProactive: (ref, surface, expectedUserActionRevision) => {
@@ -628,6 +678,58 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             return upsertSurface(current, singletonSurface(kind));
           }),
         ),
+      showModPanes: (ref) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const revision = state.userActionRevisionByThreadKey[threadKey] ?? 0;
+          const expectedRevision = state.modPanesUserActionRevisionByThreadKey[threadKey];
+          const current = state.byThreadKey[threadKey] ?? EMPTY_THREAD_STATE;
+          const surface = singletonSurface("mod-panes");
+          const present = current.surfaces.some((entry) => entry.id === surface.id);
+          // The server repeats this on every pane update: only the first one of a
+          // run of panes opens anything, and a later user choice rejects the rest.
+          if (expectedRevision !== undefined && (expectedRevision !== revision || present)) {
+            return state;
+          }
+          const userIsOnAnotherSurface =
+            current.isOpen &&
+            current.surfaces.some((entry) => entry.id === current.activeSurfaceId);
+          return {
+            ...automaticUpdate(state, threadKey, (threadState) =>
+              present ? threadState : upsertSurface(threadState, surface, !userIsOnAnotherSurface),
+            ),
+            modPanesUserActionRevisionByThreadKey: {
+              ...state.modPanesUserActionRevisionByThreadKey,
+              [threadKey]: revision,
+            },
+          };
+        }),
+      revealModPanes: (ref) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          return {
+            ...automaticUpdate(state, threadKey, (threadState) =>
+              upsertSurface(threadState, singletonSurface("mod-panes"), true),
+            ),
+            modPanesUserActionRevisionByThreadKey: {
+              ...state.modPanesUserActionRevisionByThreadKey,
+              [threadKey]: state.userActionRevisionByThreadKey[threadKey] ?? 0,
+            },
+          };
+        }),
+      hideModPanes: (ref) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const { [threadKey]: expectedRevision, ...modPanesUserActionRevisionByThreadKey } =
+            state.modPanesUserActionRevisionByThreadKey;
+          const current = state.byThreadKey[threadKey] ?? EMPTY_THREAD_STATE;
+          const next = removeSurface(current, "mod-panes");
+          if (next === current && expectedRevision === undefined) return state;
+          return {
+            ...automaticUpdate(state, threadKey, () => next),
+            modPanesUserActionRevisionByThreadKey,
+          };
+        }),
       openDevice: (ref, target, automatic = false) =>
         set((state) =>
           (automatic ? automaticUpdate : userAction)(state, scopedThreadKey(ref), (current) => {
@@ -995,7 +1097,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             !(threadKey in state.byThreadKey) &&
             !(threadKey in state.threadPanelVisibilityByThreadKey) &&
             !(threadKey in state.userActionRevisionByThreadKey) &&
-            !(threadKey in state.closeRevisionByThreadKey)
+            !(threadKey in state.closeRevisionByThreadKey) &&
+            !(threadKey in state.modPanesUserActionRevisionByThreadKey)
           ) {
             return state;
           }
@@ -1006,11 +1109,14 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             state.userActionRevisionByThreadKey;
           const { [threadKey]: _closeRevision, ...closeRevisionByThreadKey } =
             state.closeRevisionByThreadKey;
+          const { [threadKey]: _modPanes, ...modPanesUserActionRevisionByThreadKey } =
+            state.modPanesUserActionRevisionByThreadKey;
           return {
             byThreadKey,
             threadPanelVisibilityByThreadKey,
             userActionRevisionByThreadKey,
             closeRevisionByThreadKey,
+            modPanesUserActionRevisionByThreadKey,
           };
         }),
     }),
@@ -1022,9 +1128,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       ),
       partialize: (state) => ({
         byThreadKey: Object.fromEntries(
-          Object.entries(state.byThreadKey).filter(
-            ([threadKey]) => !isPullRequestsPanelKey(threadKey),
-          ),
+          Object.entries(state.byThreadKey).flatMap(([threadKey, threadState]) => {
+            if (isPullRequestsPanelKey(threadKey)) return [];
+            // Saved as the panel would be had the mod closed its panes.
+            const persisted = removeSurface(threadState, "mod-panes");
+            return isEmptyThreadState(persisted) ? [] : [[threadKey, persisted]];
+          }),
         ),
         threadPanelVisibilityByThreadKey: Object.fromEntries(
           Object.entries(state.threadPanelVisibilityByThreadKey).flatMap(
@@ -1056,6 +1165,8 @@ useRightPanelStore.subscribe((next, previous) => {
     for (const surface of closedInOrder) {
       if (
         surface.kind === "terminal" ||
+        // A mod's tab comes back by running the mod's command, not by reopening a closed tab.
+        surface.kind === "mod-panes" ||
         (surface.kind === "preview" && surface.resourceId !== null)
       )
         continue;

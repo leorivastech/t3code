@@ -170,6 +170,7 @@ import * as ProviderMaintenance from "./provider/providerMaintenance.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
+import * as Mods from "./mods/Mods.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -1275,6 +1276,19 @@ const layerWsRpc = (
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const providerAuth = yield* ProviderAuthService.ProviderAuthService;
       const providerInstallation = yield* makeProviderInstallation();
+      const mods = yield* Mods.Mods;
+      /** The folder a thread works in: its worktree, or its project's root. */
+      const threadCwd = (threadId: ThreadId, draftProjectId?: ProjectId) =>
+        Effect.gen(function* () {
+          const thread = yield* threadManagement.getThreadRecords(threadId, []).pipe(Effect.option);
+          if (Option.isSome(thread) && thread.value.thread.worktreePath) {
+            return thread.value.thread.worktreePath;
+          }
+          const projectId = Option.isSome(thread) ? thread.value.thread.projectId : draftProjectId;
+          if (projectId === undefined) return config.cwd;
+          const project = yield* projectService.getById(projectId);
+          return Option.isSome(project) ? project.value.workspaceRoot : config.cwd;
+        }).pipe(Effect.catchCause(() => Effect.succeed(config.cwd)));
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
@@ -2334,6 +2348,9 @@ const layerWsRpc = (
         [WS_METHODS.providerInstallStart]: (input) => providerInstallation.start(input),
         [WS_METHODS.providerInstallCancel]: (input) => providerInstallation.cancel(input),
         [WS_METHODS.providerInstallSubscribe]: (input) => providerInstallation.subscribe(input),
+        [WS_METHODS.modSubscribe]: (input) =>
+          mods.subscribe(input, currentSessionId, threadCwd(input.threadId, input.projectId)),
+        [WS_METHODS.modRequest]: (input) => mods.request(input, currentSessionId),
         [WS_METHODS.providerInstallRemove]: (input) => providerInstallation.remove(input),
         [WS_METHODS.serverUpdateServer]: (input) => serverSelfUpdate.update(input),
         [WS_METHODS.serverUpdateServerWithProgress]: (input) =>

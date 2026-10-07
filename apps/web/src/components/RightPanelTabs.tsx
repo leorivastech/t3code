@@ -16,6 +16,7 @@ import type {
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
   Smartphone,
+  Blocks,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -603,6 +604,8 @@ function surfaceTitle(
       return "Pull requests";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
+    case "mod-panes":
+      return "Mods";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -692,6 +695,8 @@ function SurfaceIcon({
       ) : (
         <Smartphone className="size-3 shrink-0" />
       );
+    case "mod-panes":
+      return <Blocks className="size-3 shrink-0" />;
   }
 }
 

@@ -55,6 +55,9 @@ import {
   DeviceScreenshotToolkit,
   DeviceStandardToolkit,
 } from "./toolkits/device/tools.ts";
+import * as Mods from "../mods/Mods.ts";
+import * as ModsHandlers from "./toolkits/mods/handlers.ts";
+import { ModsToolkit } from "./toolkits/mods/tools.ts";
 import * as HtmlHandlers from "./toolkits/html/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
 
@@ -776,6 +779,11 @@ export const layerHtmlToolkit = Layer.mergeAll(
   imageToolRegistration(registerHtmlPreview(), HtmlHandlers.layerPreview),
 ).pipe(Layer.provide(HtmlRender.layer));
 
+/** Shares `Mods.layer` with the websocket routes, so an agent runs the mods the person sees. */
+const layerModsToolkit = toolkitRegistration(ModsToolkit, ModsHandlers.layer).pipe(
+  Layer.provide(Mods.layer),
+);
+
 const layerPreviewStandardToolkitRegistration = toolkitRegistration(
   PreviewStandardToolkit,
   PreviewHandlers.layerStandard,
@@ -859,4 +867,5 @@ export const layer = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
+  layerModsToolkit,
 ).pipe(Layer.provideMerge(layerMcpTransport));

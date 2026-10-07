@@ -432,6 +432,17 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { ModBand } from "./mod/ModBand";
+import { fillModPrompt, matchModCommand } from "./mod/modComposer";
+import { ModPanes, useModPanesTab } from "./mod/ModPanes";
+import {
+  awaitModCommands,
+  runModCommand,
+  setModDraftProject,
+  useMod,
+  useModAskHandler,
+  useModSlashCommands,
+} from "./mod/useMod";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { isTimelineScrollTarget } from "./chat/timelineScrollTarget";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
@@ -724,6 +735,8 @@ const TYPE_TO_FOCUS_INTERACTIVE_SELECTOR = [
   '[role="radio"]',
   '[role="switch"]',
   '[role="tab"]',
+  // A site a mod draws holds the keyboard for its own hotkeys.
+  "[data-mods-site]",
 ].join(",");
 // Popups match only while open or closing: some stay mounted when closed,
 // such as the chat header actions menu.
@@ -3276,6 +3289,15 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
   const selectedProvider = selectedProviderEntry?.driverKind ?? requestedDriverKind;
+  // Mods run for any thread, whichever provider it talks to. A draft has no
+  // thread on the server yet, so it says which project's folder to run them in.
+  const modThreadId = routeKind === "draft" && activeProject === null ? null : threadId;
+  setModDraftProject(
+    environmentId,
+    threadId,
+    routeKind === "draft" ? (activeProject?.id ?? null) : null,
+  );
+  useModPanesTab(environmentId, modThreadId, modThreadId === null ? null : activeThreadRef);
   const activeProviderInstanceId = selectedProviderEntry?.instanceId ?? null;
   const activeProviderStatus = selectedProviderEntry?.snapshot ?? null;
   const { enabled: interactionModeEnabled, interactionMode } = resolveComposerInteractionMode({
@@ -4110,6 +4132,29 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
+  const modSurface = useMod(environmentId, modThreadId)?.surface ?? null;
+  const modCommands = useModSlashCommands(environmentId, modThreadId);
+  // What a mod asks of the composer: `$.prompt.read` and `$.prompt.fill`.
+  useModAskHandler(environmentId, modThreadId, (ask) => {
+    const composer = composerRef.current;
+    // A question the composer is answering holds its text: that is not the draft.
+    if (composer === null || activePendingProgress) {
+      return ask.kind === "promptFill" ? { filled: false } : undefined;
+    }
+    const snapshot = composer.readSnapshot();
+    const draft = { text: snapshot.value, cursor: snapshot.expandedCursor };
+    if (ask.kind === "promptRead") return draft;
+    if (ask.kind !== "promptFill") return undefined;
+    const filled = fillModPrompt(draft, ask);
+    promptRef.current = filled.text;
+    setComposerDraftPrompt(composerDraftTarget, filled.text);
+    composer.resetCursorState({
+      prompt: filled.text,
+      cursor: collapseExpandedComposerCursor(filled.text, filled.cursor),
+    });
+    return { filled: true };
+  });
+  const modCommandRunningRef = useRef(false);
   const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
@@ -8658,6 +8703,34 @@ export default function ChatView(props: ChatViewProps) {
   ) => {
     e?.preventDefault();
     const keepFullHistory = keepFullHistoryOnceRef.current;
+    // A mod's own command runs in the mod and never reaches the provider, unless
+    // no mod takes it after all.
+    const mayRunModCommand =
+      !directAnnotation && !composerHasNonPromptContent && !activePendingProgress;
+    // Sent right after the thread opened, before its mods said what they offer.
+    const knownModCommands =
+      mayRunModCommand &&
+      modSurface !== null &&
+      modCommands.length === 0 &&
+      /^\/\S/.test(promptRef.current.trim())
+        ? await awaitModCommands(modSurface)
+        : modCommands;
+    const modCommand = mayRunModCommand
+      ? matchModCommand(promptRef.current, knownModCommands)
+      : null;
+    if (modCommand !== null && modSurface !== null) {
+      if (modCommandRunningRef.current) return;
+      modCommandRunningRef.current = true;
+      const submitted = promptRef.current;
+      const outcome = await runModCommand(modSurface, modCommand.command, modCommand.args);
+      modCommandRunningRef.current = false;
+      if (outcome === "ran" && promptRef.current === submitted) {
+        promptRef.current = "";
+        setComposerDraftPrompt(composerDraftTarget, "");
+        composerRef.current?.resetCursorState();
+      }
+      if (outcome !== "missing") return;
+    }
     // Typed out in full rather than picked from the menu. Attachments or contexts
     // mean the user is sending a prompt, so those go through as usual.
     if (
@@ -10973,6 +11046,16 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : renderedRightPanelSurface?.kind === "pull-requests" && activeThreadRef ? (
       <ThreadPullRequestsPanel threadRef={activeThreadRef} />
+    ) : renderedRightPanelSurface?.kind === "mod-panes" ? (
+      modThreadId === null ? null : (
+        <ModPanes
+          environmentId={environmentId}
+          threadId={modThreadId}
+          cwd={gitCwd ?? undefined}
+          draftTarget={composerDraftTarget}
+          onReturnFocus={focusComposer}
+        />
+      )
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -11495,9 +11578,18 @@ export default function ChatView(props: ChatViewProps) {
                               }
                             />
                           ) : null}
+                          {!composerMounted || modThreadId === null ? null : (
+                            <ModBand
+                              environmentId={environmentId}
+                              threadId={modThreadId}
+                              cwd={gitCwd ?? undefined}
+                              isWorking={isWorking}
+                            />
+                          )}
                           {!composerMounted ? null : (
                             <ChatComposer
                               canOperateThread={canOperateThread}
+                              modCommands={modCommands}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}
                               supportsMultipleModels={

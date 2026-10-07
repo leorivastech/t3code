@@ -22,6 +22,7 @@ import type {
   ChatAttachment as ContractChatAttachment,
   ChatFileAttachment,
   EnvironmentId,
+  ModCommand,
   ModelSelection,
   ProjectId,
   PullRequestListInput,
@@ -200,6 +201,7 @@ import {
   shouldUseRestingComposerLayout,
 } from "../composerFooterLayout";
 import { measureRestingComposerControls } from "./restingComposerControlsMeasurement";
+import { withModSlashCommands } from "../mod/modComposer";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import {
   ComposerContextActionsContext,
@@ -1510,6 +1512,8 @@ export interface ChatComposerProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   canOperateThread: boolean;
+  /** The slash commands the thread's mods registered, offered beside the provider's. */
+  modCommands: ReadonlyArray<ModCommand>;
   attachmentUploadsCapabilityKnown: boolean;
   supportsAttachmentUploads: boolean;
   supportsQuestionAttachments: boolean;
@@ -1701,6 +1705,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerDraftTarget,
     environmentId,
     canOperateThread,
+    modCommands,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     supportsQuestionAttachments,
@@ -2196,10 +2201,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const selectedProviderSlashCommands = useMemo(
     () =>
-      selectedProviderStatus
-        ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
-        : [],
-    [gitCwd, selectedProviderStatus],
+      withModSlashCommands(
+        selectedProviderStatus
+          ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
+          : [],
+        modCommands,
+      ),
+    [gitCwd, modCommands, selectedProviderStatus],
   );
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,

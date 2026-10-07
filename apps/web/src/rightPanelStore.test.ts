@@ -26,6 +26,7 @@ beforeEach(() => {
     threadPanelVisibilityByThreadKey: {},
     userActionRevisionByThreadKey: {},
     closeRevisionByThreadKey: {},
+    modPanesUserActionRevisionByThreadKey: {},
   });
 });
 
@@ -322,6 +323,184 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("diff");
   });
 
+  const modPanes = { id: "mod-panes", kind: "mod-panes" } as const;
+  const threadState = () =>
+    selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+
+  it("opens a closed panel on the mod panes when a mod opens one", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    store.close(refA);
+
+    store.showModPanes(refA);
+
+    expect(threadState()).toEqual({
+      isOpen: true,
+      activeSurfaceId: "mod-panes",
+      surfaces: [completedDiff, modPanes],
+    });
+  });
+
+  it("brings the mod panes back when a command asks for them after the user put the panel away", () => {
+    const store = useRightPanelStore.getState();
+    store.showModPanes(refA);
+    store.open(refA, "diff");
+    store.close(refA);
+
+    // The pane is still open in its mod, so this alone leaves the closed panel alone.
+    store.showModPanes(refA);
+    expect(threadState()?.isOpen).toBe(false);
+
+    store.revealModPanes(refA);
+
+    expect(threadState()).toMatchObject({ isOpen: true, activeSurfaceId: "mod-panes" });
+  });
+
+  it("opens the mod panes over an open panel that has no surface", () => {
+    const store = useRightPanelStore.getState();
+    store.toggleVisibility(refA);
+
+    store.showModPanes(refA);
+
+    expect(threadState()).toEqual({
+      isOpen: true,
+      activeSurfaceId: "mod-panes",
+      surfaces: [modPanes],
+    });
+  });
+
+  it("adds the mod panes beside the surface the user is on without taking over", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    const revision = store.getUserActionRevision(refA);
+
+    store.showModPanes(refA);
+    store.showModPanes(refA);
+
+    expect(threadState()).toEqual({
+      isOpen: true,
+      activeSurfaceId: "diff",
+      surfaces: [completedDiff, modPanes],
+    });
+    // Neither showing nor hiding is the user's choice, so proactive panels still apply.
+    store.hideModPanes(refA);
+    expect(store.getUserActionRevision(refA)).toBe(revision);
+  });
+
+  it.each([
+    { choice: "hid the panel", choose: () => useRightPanelStore.getState().close(refA) },
+    {
+      choice: "closed the tab",
+      choose: () => useRightPanelStore.getState().closeSurface(refA, "mod-panes"),
+    },
+    {
+      choice: "closed every tab",
+      choose: () => useRightPanelStore.getState().closeAllSurfaces(refA),
+    },
+    {
+      choice: "moved to another tab",
+      choose: () => useRightPanelStore.getState().activateSurface(refA, "diff"),
+    },
+  ])("leaves the panel alone on later pane updates once the user $choice", ({ choose }) => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    store.close(refA);
+    store.showModPanes(refA);
+    choose();
+    const chosen = threadState();
+
+    store.showModPanes(refA);
+
+    expect(threadState()).toBe(chosen);
+  });
+
+  it("shows the mod panes again when a mod opens a pane after closing its last one", () => {
+    const store = useRightPanelStore.getState();
+    store.showModPanes(refA);
+    store.closeSurface(refA, "mod-panes");
+    store.showModPanes(refA);
+    expect(threadState().surfaces).toEqual([]);
+
+    store.hideModPanes(refA);
+    store.showModPanes(refA);
+
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe(
+      "mod-panes",
+    );
+  });
+
+  it("keeps a thread's dismissed mod panes from affecting another thread", () => {
+    const store = useRightPanelStore.getState();
+    store.showModPanes(refA);
+    store.closeSurface(refA, "mod-panes");
+
+    store.showModPanes(refB);
+    store.showModPanes(refA);
+
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refB)).toBe(
+      "mod-panes",
+    );
+    expect(threadState().surfaces).toEqual([]);
+  });
+
+  it("hands the selection to a neighbor when the mod closes its last pane", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    store.showModPanes(refA);
+    store.open(refA, "files");
+    store.activateSurface(refA, "mod-panes");
+
+    store.hideModPanes(refA);
+
+    expect(threadState()).toEqual({
+      isOpen: true,
+      activeSurfaceId: "files",
+      surfaces: [completedDiff, { id: "files", kind: "files" }],
+    });
+  });
+
+  it("keeps the user's surface when the mod panes close in the background", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    store.showModPanes(refA);
+
+    store.hideModPanes(refA);
+
+    expect(threadState()).toEqual({
+      isOpen: true,
+      activeSurfaceId: "diff",
+      surfaces: [completedDiff],
+    });
+  });
+
+  it("closes the panel when the mod panes were its only surface", () => {
+    const store = useRightPanelStore.getState();
+    store.showModPanes(refA);
+
+    store.hideModPanes(refA);
+
+    expect(useRightPanelStore.getState().byThreadKey).toEqual({});
+  });
+
+  it("saves the panel without its mod panes", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    store.showModPanes(refA);
+    store.activateSurface(refA, "mod-panes");
+    store.showModPanes(refB);
+
+    const saved = useRightPanelStore.persist
+      .getOptions()
+      .partialize?.(useRightPanelStore.getState());
+
+    expect(saved).toMatchObject({
+      byThreadKey: {
+        "env-1:thread-A": { isOpen: true, activeSurfaceId: "diff", surfaces: [completedDiff] },
+      },
+    });
+    expect(saved).not.toHaveProperty(["byThreadKey", "env-1:thread-B"]);
+  });
+
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({
@@ -489,6 +668,7 @@ describe("rightPanelStore", () => {
     { kind: "plan", isOpen: true },
     { kind: "agents", isOpen: true },
     { kind: "agents", isOpen: false },
+    { kind: "mod-panes", isOpen: true },
   ])("drops $kind with isOpen=$isOpen and falls back", ({ kind, isOpen }) => {
     expect(
       migratePersistedRightPanelState({
