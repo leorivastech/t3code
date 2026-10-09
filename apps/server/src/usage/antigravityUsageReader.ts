@@ -121,6 +121,9 @@ interface Metadata {
   usages: Fields[];
 }
 
+const USAGE_COUNTER_FIELDS = [2, 3, 4, 5, 9, 10] as const;
+const USAGE_ID_FIELDS = [11, 12, 7] as const;
+
 function metadata(bytes: Uint8Array, step: boolean): Metadata {
   const root = fields(bytes);
   if (!step && bytesAt(root, 1) === undefined) {
@@ -129,12 +132,29 @@ function metadata(bytes: Uint8Array, step: boolean): Metadata {
   const data = step ? root : nested(root, 1);
   const model = step ? nested(data, 24) : data;
   const usage = bytesAt(data, step ? 9 : 4);
-  const usages = usage === undefined ? [] : [fields(usage)];
+  const main = usage === undefined ? undefined : fields(usage);
+  const attempts: Fields[] = [];
   for (const retry of data.get(step ? 28 : 17) ?? []) {
     if (!(retry instanceof Uint8Array)) throw new Error("Invalid retry metadata");
     const retryUsage = bytesAt(fields(retry), 2);
-    if (retryUsage !== undefined) usages.push(fields(retryUsage));
+    if (retryUsage !== undefined) attempts.push(fields(retryUsage));
   }
+  // A main usage equal to the sum of the attempts is their total, not another call.
+  // An attempt carrying a different response id is kept apart just in case.
+  const mainIsTotal =
+    main !== undefined &&
+    attempts.length > 0 &&
+    attempts.every((attempt) =>
+      USAGE_ID_FIELDS.every((key) => {
+        const id = textAt(attempt, key);
+        return id === "" || id === textAt(main, key);
+      }),
+    ) &&
+    USAGE_COUNTER_FIELDS.every(
+      (key) =>
+        numberAt(main, key) === attempts.reduce((sum, attempt) => sum + numberAt(attempt, key), 0),
+    );
+  const usages = main === undefined || mainIsTotal ? attempts : [main, ...attempts];
   return {
     model: modelName(
       textAt(model, step ? 12 : 19) || textAt(model, step ? 8 : 21),
@@ -203,6 +223,7 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
       ["step", steps],
       ["generation", generations],
     ] as const) {
+      const occurrences = new Map<string, number>();
       for (const [index, { idx, entry }] of entries.entries()) {
         for (const [usageIndex, usage] of entry.usages.entries()) {
           const outputTokens = Math.max(
@@ -224,7 +245,7 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
             0
           )
             continue;
-          const keys = ([11, 12, 7] as const).flatMap((key) => {
+          const keys = USAGE_ID_FIELDS.flatMap((key) => {
             const id = textAt(usage, key);
             return id ? [`antigravity:${key}:${id}`] : [];
           });
@@ -243,6 +264,15 @@ async function readDatabase(path: string, fallbackTimestamp: number): Promise<Us
             speed: "standard",
             dedupeKey: keys[0] ?? `antigravity:${sessionId}:${source}:${index}:${usageIndex}`,
           };
+          if (keys.length === 0) {
+            const counters = JSON.stringify(
+              USAGE_COUNTER_FIELDS.map((key) => numberAt(usage, key)),
+            );
+            const occurrence = occurrences.get(counters) ?? 0;
+            occurrences.set(counters, occurrence + 1);
+            // Pair nth step and generation copies only within this database.
+            keys.push(`antigravity:local:${JSON.stringify([path, counters, occurrence])}`);
+          }
           records.push({
             record,
             keys,
