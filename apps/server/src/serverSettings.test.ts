@@ -1354,6 +1354,29 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("stores, preserves and removes the voice key without exposing it to clients", () =>
+    Effect.gen(function* () {
+      const settings = yield* ServerSettingsModule.ServerSettingsService;
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const saved = yield* settings.updateSettings({ voice: { apiKey: "gsk_voice_test" } });
+      assert.equal(saved.voice.apiKey, "gsk_voice_test");
+      const redacted = ServerSettingsModule.redactServerSettingsForClient(saved);
+      assert.notEqual(redacted.voice.apiKey, saved.voice.apiKey);
+      assert.notInclude(yield* fs.readFileString(config.settingsPath), "gsk_voice_test");
+      const toggled = yield* settings.updateSettings({ voice: { localWhisper: true } });
+      assert.equal(toggled.voice.apiKey, "gsk_voice_test");
+      assert.isTrue(toggled.voice.localWhisper);
+      const preserved = yield* settings.updateSettings({
+        voice: { apiKey: redacted.voice.apiKey },
+      });
+      assert.equal(preserved.voice.apiKey, "gsk_voice_test");
+      const removed = yield* settings.updateSettings({ voice: { apiKey: "" } });
+      assert.equal(removed.voice.apiKey, "");
+      assert.isTrue(removed.voice.localWhisper);
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("stores sensitive provider instance environment values outside settings.json", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;

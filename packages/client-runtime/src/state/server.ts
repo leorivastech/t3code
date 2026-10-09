@@ -1195,6 +1195,10 @@ export function createServerEnvironmentAtoms<R, E>(
       concurrency: configConcurrency,
     }),
     updateSettings,
+    interpretVoice: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:interpret-voice",
+      tag: WS_METHODS.serverInterpretVoice,
+    }),
     // Provider-instance mutations share the settings command and its
     // environment-serial scheduler. The named boundary keeps clients on the
     // atomic map-entry payload instead of rebuilding a stale whole map.

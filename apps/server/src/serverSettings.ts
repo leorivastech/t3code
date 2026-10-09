@@ -157,6 +157,7 @@ function usageLimitSourceSecretName(sourceId: string): string {
   return `usage-limit-source-${Buffer.from(sourceId, "utf8").toString("base64url")}`;
 }
 
+const VOICE_SECRET_NAME = "voice-api-key";
 const BITBUCKET_SECRET_NAMES = {
   accessToken: "bitbucket-access-token",
   apiToken: "bitbucket-api-token",
@@ -217,7 +218,8 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
       Object.entries(settings.github.tokens).map(([host, token]) => [host, redactSecret(token)]),
     ),
   };
-  return { ...settings, providerInstances, usageLimitSources, bitbucket, github };
+  const voice = { ...settings.voice, apiKey: redactSecret(settings.voice.apiKey) };
+  return { ...settings, providerInstances, usageLimitSources, bitbucket, github, voice };
 }
 
 export function applyProviderInstanceMutation(
@@ -766,7 +768,26 @@ const make = Effect.gen(function* () {
         tokens[host] = SECRET_REDACTED;
         moved = true;
       }
-      return moved ? { ...settings, bitbucket, github: { ...settings.github, tokens } } : settings;
+      let voice = settings.voice;
+      if (voice.apiKey.length > 0 && voice.apiKey !== SECRET_REDACTED) {
+        const stored = yield* secretStore
+          .set(VOICE_SECRET_NAME, textEncoder.encode(voice.apiKey))
+          .pipe(
+            Effect.as(true),
+            Effect.catch(() =>
+              Effect.logWarning("failed to move the voice key into the secret store").pipe(
+                Effect.as(false),
+              ),
+            ),
+          );
+        if (stored) {
+          voice = { ...voice, apiKey: SECRET_REDACTED };
+          moved = true;
+        }
+      }
+      return moved
+        ? { ...settings, bitbucket, github: { ...settings.github, tokens }, voice }
+        : settings;
     });
 
   const loadSettingsFromDisk = Effect.gen(function* () {
@@ -960,12 +981,24 @@ const make = Effect.gen(function* () {
           );
         tokens[host] = Option.isSome(secret) ? textDecoder.decode(secret.value) : "";
       }
+      let voice = settings.voice;
+      if (voice.apiKey === SECRET_REDACTED) {
+        const secret = yield* secretStore
+          .get(VOICE_SECRET_NAME)
+          .pipe(
+            Effect.mapError(
+              (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+            ),
+          );
+        voice = { ...voice, apiKey: Option.isSome(secret) ? textDecoder.decode(secret.value) : "" };
+      }
       return {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
         bitbucket,
         github: { ...settings.github, tokens },
+        voice,
       };
     });
 
@@ -1159,6 +1192,25 @@ const make = Effect.gen(function* () {
         });
       }
 
+      let voice = next.voice;
+      const inlineVoiceKey = current.voice.apiKey;
+      const voiceKey =
+        voice.apiKey !== SECRET_REDACTED
+          ? voice.apiKey
+          : inlineVoiceKey === SECRET_REDACTED || inlineVoiceKey.length === 0
+            ? null
+            : inlineVoiceKey;
+      if (voiceKey !== null && voiceKey.length === 0) {
+        changes.push({ kind: "remove", secretName: VOICE_SECRET_NAME, operation: "remove-secret" });
+      } else if (voiceKey !== null) {
+        changes.push({
+          kind: "write",
+          secretName: VOICE_SECRET_NAME,
+          value: textEncoder.encode(voiceKey),
+        });
+        voice = { ...voice, apiKey: SECRET_REDACTED };
+      }
+
       return {
         settings: {
           ...next,
@@ -1166,6 +1218,7 @@ const make = Effect.gen(function* () {
           usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
           bitbucket,
           github: { ...next.github, tokens },
+          voice,
         },
         changes,
       };

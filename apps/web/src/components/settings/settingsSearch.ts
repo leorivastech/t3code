@@ -624,6 +624,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     providerSettingsOnly: true,
   },
   {
+    id: "voice",
+    title: "Voice",
+    to: "/settings/integrations",
+    searchTerms: [
+      "speech microphone push to talk hold key orders dictation groq openai api key local whisper",
+    ],
+    environmentOnly: true,
+  },
+  {
     id: "agent-browser-access",
     title: "Agent browser access",
     to: "/settings/integrations",
