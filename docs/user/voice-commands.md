@@ -37,7 +37,7 @@ recording, and then its text, to that provider; T3 Code keeps neither.
 **Key to hold** is the key you keep down while speaking, on this device. Right Ctrl by
 default. Pick one you do not type with. Pressed together with another key it is an ordinary
 shortcut, and a tap is ignored, so the key keeps its usual job. It only listens while T3 Code
-is in front.
+is in front. Browser microphone access requires HTTPS or localhost and microphone permission.
 
 ## What you can say
 

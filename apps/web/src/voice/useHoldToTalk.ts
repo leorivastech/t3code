@@ -136,6 +136,10 @@ export function useHoldToTalk(input: {
     };
 
     const start = () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        onMicrophoneError();
+        return;
+      }
       const current: Take = {
         startedAt: performance.now(),
         released: false,
