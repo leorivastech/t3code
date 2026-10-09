@@ -1,3 +1,4 @@
+import { pickModelByQuery } from "./modelPickerSearch";
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
@@ -1465,6 +1466,10 @@ export interface ChatComposerHandle {
   openModelPicker: () => void;
   toggleModelPicker: () => void;
   openControl: (command: KeybindingCommand) => void;
+  /** Select the model a name means, as the picker's search would. Returns its name, or null. */
+  selectModelByQuery: (query: string) => string | null;
+  /** Send the draft, as the send button does. */
+  submit: () => void;
   isModelPickerOpen: () => boolean;
   /** True when a collapsed caret sits before everything in the draft, including when it is empty. */
   isCaretAtStart: () => boolean;
@@ -6467,6 +6472,37 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (!trigger) return;
         trigger.focus({ preventScroll: true });
         trigger.click();
+      },
+      selectModelByQuery: (query) => {
+        const candidates = providerInstanceEntries.flatMap((entry) =>
+          (modelOptionsByInstance.get(entry.instanceId) ?? [])
+            .filter(
+              (option) =>
+                option.isUnavailable !== true &&
+                getModelDisabledReason(entry.instanceId, option.slug) === null,
+            )
+            .map((option) => ({
+              instanceId: entry.instanceId,
+              slug: option.slug,
+              name: option.name,
+              ...(option.shortName ? { shortName: option.shortName } : {}),
+              ...(option.subProvider ? { subProvider: option.subProvider } : {}),
+              driverKind: entry.driverKind,
+              providerDisplayName: entry.displayName,
+            })),
+        );
+        const match = pickModelByQuery(
+          candidates,
+          query,
+          (model) => model.instanceId === selectedInstanceId,
+        );
+        if (match === null) return null;
+        setMultipleModelSelections(null);
+        onProviderModelSelect(match.instanceId, match.slug);
+        return match.name;
+      },
+      submit: () => {
+        composerFormRef.current?.requestSubmit();
       },
       compactContext: compactThreadContext,
       isModelPickerOpen: () => isComposerModelPickerOpen,

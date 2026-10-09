@@ -539,6 +539,13 @@ export interface PickedThemeFile {
   text: string;
 }
 
+/** A picture of the screen: already on the clipboard, and kept at `path` unless saving failed. */
+export const DesktopScreenCapture = Schema.Struct({
+  path: Schema.NullOr(Schema.String),
+  pngBase64: Schema.String,
+});
+export type DesktopScreenCapture = typeof DesktopScreenCapture.Type;
+
 export const PickedThemeFileSchema = Schema.Struct({
   name: Schema.String,
   size: Schema.Number,
@@ -1195,6 +1202,8 @@ export interface DesktopBridge {
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   /** Optional while older desktop shells can host a newer web client. */
   pickProjectFavicon?: (initialPath?: string) => Promise<string | null>;
+  /** Optional while older desktop shells can host a newer web client. */
+  captureScreen?: () => Promise<DesktopScreenCapture | null>;
   /**
    * Multi-select JSON file picker that opens in the VS Code extensions
    * directory when one exists. Optional: older desktop builds lack it, and

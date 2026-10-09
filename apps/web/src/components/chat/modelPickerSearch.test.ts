@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
+import {
+  buildModelPickerSearchText,
+  pickModelByQuery,
+  scoreModelPickerSearch,
+} from "./modelPickerSearch";
 
 describe("buildModelPickerSearchText", () => {
   it("builds provider-agnostic search text from generic fields", () => {
@@ -127,5 +131,43 @@ describe("scoreModelPickerSearch", () => {
         "personal",
       ),
     ).not.toBeNull();
+  });
+});
+
+describe("pickModelByQuery", () => {
+  const claude = { driverKind: "claudeAgent", providerDisplayName: "Claude" };
+  const codex = { driverKind: "codex", providerDisplayName: "Codex" };
+  const models = [
+    { slug: "opus-5-5", name: "Claude Opus 5.5", ...claude },
+    { slug: "sonnet-5-5", name: "Claude Sonnet 5.5", ...claude },
+    { slug: "opus-5", name: "Claude Opus 5", ...claude },
+    { slug: "gpt-astra", name: "GPT-6-Astra", ...codex },
+    { slug: "gpt-sol", name: "GPT-6-Sol", ...codex },
+  ];
+
+  it("picks the first listed model that carries the name, not the shortest", () => {
+    expect(pickModelByQuery(models, "opus")?.slug).toBe("opus-5-5");
+    expect(pickModelByQuery(models, "opus 5")?.slug).toBe("opus-5");
+    expect(pickModelByQuery(models, "gpt")?.slug).toBe("gpt-astra");
+  });
+
+  it("reads a provider's name as its first model", () => {
+    expect(pickModelByQuery(models, "codex")?.slug).toBe("gpt-astra");
+    expect(pickModelByQuery(models, "claude")?.slug).toBe("opus-5-5");
+  });
+
+  it("puts a favorite, then the instance already in use, ahead of list order", () => {
+    const favorite = models.map((model) =>
+      model.slug === "opus-5" ? { ...model, isFavorite: true } : model,
+    );
+    expect(pickModelByQuery(favorite, "opus")?.slug).toBe("opus-5");
+    expect(pickModelByQuery(models, "claude", (model) => model.slug === "sonnet-5-5")?.slug).toBe(
+      "sonnet-5-5",
+    );
+  });
+
+  it("answers null when nothing matches or nothing was asked", () => {
+    expect(pickModelByQuery(models, "llama")).toBeNull();
+    expect(pickModelByQuery(models, "  ")).toBeNull();
   });
 });

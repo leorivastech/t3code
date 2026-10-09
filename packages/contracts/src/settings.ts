@@ -504,6 +504,10 @@ export const ClientSettingsSchema = Schema.Struct({
   snapShotFlash: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   snapShotAnimations: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** The key held while speaking an order, as a `KeyboardEvent.code`. */
+  voiceHoldKey: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("ControlRight")),
+  ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -831,6 +835,17 @@ export const GitHubHostSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type GitHubHostSettings = typeof GitHubHostSettings.Type;
+
+/**
+ * Spoken orders in this environment. One key, from Groq or OpenAI, both hears
+ * and understands; an empty key disables cloud voice. The key
+ * lives in the server's secret store and clients only see a redaction marker.
+ */
+export const VoiceSettings = Schema.Struct({
+  localWhisper: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  apiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type VoiceSettings = typeof VoiceSettings.Type;
 
 export const GitHubSettings = Schema.Struct({
   /** Keyed by lowercased host, for example `github.com`. */
@@ -1243,6 +1258,7 @@ export const ServerSettings = Schema.Struct({
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   bitbucket: BitbucketSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   github: GitHubSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  voice: VoiceSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // Keyed by a user-chosen id so a source keeps its rows across edits. Entries
   // this build cannot decode round-trip untouched, as provider instances do.
   usageLimitSources: Schema.Record(UsageLimitSourceId, UsageLimitSourceConfig).pipe(
@@ -1485,6 +1501,12 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   /** An empty token clears it; an omitted one keeps what the server has. */
+  voice: Schema.optionalKey(
+    Schema.Struct({
+      apiKey: Schema.optionalKey(TrimmedString),
+      localWhisper: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
   bitbucket: Schema.optionalKey(
     Schema.Struct({
       email: Schema.optionalKey(TrimmedString),
@@ -1613,6 +1635,7 @@ export const ClientSettingsPatch = Schema.Struct({
   composerCollapseOnScroll: Schema.optionalKey(Schema.Boolean),
   composerRichTextEnabled: Schema.optionalKey(Schema.Boolean),
   sendShortcut: Schema.optionalKey(Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"])),
+  voiceHoldKey: Schema.optionalKey(TrimmedNonEmptyString),
   followUpBehavior: Schema.optionalKey(Schema.Literals(["queue", "steer"])),
   proactivePanelsEnabled: Schema.optionalKey(Schema.Boolean),
   showSkillsInSlashMenu: Schema.optionalKey(Schema.Boolean),
