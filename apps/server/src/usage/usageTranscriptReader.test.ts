@@ -692,6 +692,70 @@ describe("SQLite usage readers", () => {
     );
   });
 
+  it("keeps the response id of an Antigravity usage whose single attempt has none", async () => {
+    const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "id-on-main.db"));
+    const counters = [
+      ...protoNumber(2, 100),
+      ...protoNumber(3, 40),
+      ...protoNumber(5, 20),
+      ...protoNumber(10, 40),
+    ];
+    try {
+      db.exec(
+        "CREATE TABLE gen_metadata (idx INTEGER, data BLOB); CREATE TABLE steps (idx INTEGER, metadata BLOB)",
+      );
+      db.prepare("INSERT INTO steps VALUES (?, ?)").run(
+        3,
+        new Uint8Array([
+          ...protoBytes(9, [...counters, ...protoText(11, "response-1")]),
+          ...protoBytes(28, protoBytes(2, counters)),
+        ]),
+      );
+      db.prepare("INSERT INTO gen_metadata VALUES (?, ?)").run(
+        0,
+        new Uint8Array(protoBytes(1, protoBytes(4, [...counters, ...protoText(11, "response-1")]))),
+      );
+    } finally {
+      db.close();
+    }
+    const result = await readAntigravityUsage(dir, 0);
+    assert.deepStrictEqual(result.errors, []);
+    const records = result.files.flatMap((file) => file.records);
+    assert.strictEqual(records.length, 1);
+    assert.strictEqual(records[0]?.totals.uncachedInputTokens, 100);
+  });
+
+  it("keeps the Antigravity total when the attempts share one response id", async () => {
+    const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "shared-id.db"));
+    const counters = (input: number, output: number) => [
+      ...protoNumber(2, input),
+      ...protoNumber(3, output),
+      ...protoNumber(10, output),
+      ...protoText(11, "response-1"),
+    ];
+    try {
+      db.exec("CREATE TABLE gen_metadata (idx INTEGER, data BLOB)");
+      db.prepare("INSERT INTO gen_metadata VALUES (?, ?)").run(
+        0,
+        new Uint8Array(
+          protoBytes(1, [
+            ...protoBytes(4, counters(300, 30)),
+            ...protoBytes(17, protoBytes(2, counters(100, 10))),
+            ...protoBytes(17, protoBytes(2, counters(200, 20))),
+          ]),
+        ),
+      );
+    } finally {
+      db.close();
+    }
+    const result = await readAntigravityUsage(dir, 0);
+    assert.deepStrictEqual(result.errors, []);
+    const records = result.files.flatMap((file) => file.records);
+    assert.strictEqual(records.length, 1);
+    assert.strictEqual(records[0]?.totals.uncachedInputTokens, 300);
+    assert.strictEqual(records[0]?.totals.outputTokens, 30);
+  });
+
   it("keeps an Antigravity list entry apart when it carries another response id", async () => {
     const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "other-id.db"));
     const counters = [

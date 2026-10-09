@@ -154,7 +154,21 @@ function metadata(bytes: Uint8Array, step: boolean): Metadata {
       (key) =>
         numberAt(main, key) === attempts.reduce((sum, attempt) => sum + numberAt(attempt, key), 0),
     );
-  const usages = main === undefined || mainIsTotal ? attempts : [main, ...attempts];
+  // A single attempt is the same usage stored twice: keep the main copy, which carries the
+  // response ids. Several attempts are separate calls unless they share a response id, in
+  // which case the id merge would collapse them, so the total is kept as one record instead.
+  const attemptIds = attempts.flatMap((attempt) =>
+    USAGE_ID_FIELDS.map((key) => textAt(attempt, key)).filter((id) => id !== ""),
+  );
+  const attemptsAreDistinct = new Set(attemptIds).size === attemptIds.length;
+  const usages =
+    main === undefined
+      ? attempts
+      : mainIsTotal && attempts.length > 1 && attemptsAreDistinct
+        ? attempts
+        : mainIsTotal
+          ? [main]
+          : [main, ...attempts];
   return {
     model: modelName(
       textAt(model, step ? 12 : 19) || textAt(model, step ? 8 : 21),
